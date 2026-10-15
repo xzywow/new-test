@@ -7,17 +7,23 @@ from browser_manager import BrowserManager
 from dianxiaomi_reader import DianxiaomiReader
 from export_service import export_products
 from storage import configure_logging
+from data_paths import ensure_data_dir
 
 
 def main():
     parser = argparse.ArgumentParser(description='店小秘采集箱只读导出工具')
     parser.add_argument('--selectors', type=Path, help='自定义 CSS 选择器 JSON')
     parser.add_argument('--profile', type=Path, default=Path('.browser-profile'))
-    parser.add_argument('--output', type=Path, default=Path('output'))
+    parser.add_argument('--output', type=Path, help='导出目录，Windows 默认 D:\\店小秘数据')
     parser.add_argument('--max-pages', type=int, default=100)
     args = parser.parse_args()
     if args.max_pages < 1:
         parser.error('--max-pages 必须大于零')
+    try:
+        args.output = args.output if args.output is not None else ensure_data_dir()
+    except (OSError, ValueError) as error:
+        print('数据目录准备失败：', error)
+        return 1
     directory = args.output / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     directory.mkdir(parents=True)
     configure_logging(directory / 'reader.log')

@@ -11,6 +11,7 @@ from playwright.sync_api import sync_playwright
 from chrome_diagnostics import find_chrome, inspect_extension, validate_endpoint, EXTENSION_ID
 from dianxiaomi_reader import source_identity
 from extension_package import prepare_extension
+from data_paths import resolve_default_file
 
 
 def exact_source_matches(rows, expected_id):
@@ -110,13 +111,18 @@ def main():
     parser.add_argument('--product-url', required=True)
     parser.add_argument('--rows', default='table tbody tr', help='实际采集箱商品行 CSS 选择器')
     parser.add_argument('--endpoint', help='明确授权复用的本机 Chrome CDP 地址；不会读取或复制个人浏览器目录')
-    parser.add_argument('--report', type=Path, default=Path('output/plugin-probe.json'))
+    parser.add_argument('--report', type=Path, help='默认 Windows D 盘业务数据目录')
     args = parser.parse_args()
     source, product_id = source_identity(args.product_url)
     if not product_id or urlsplit(source).scheme != 'https':
         parser.error('需要 https://www.aliexpress.com/item/数字.html 商品地址')
     if not EXTENSION_ID.fullmatch(args.extension_id):
         parser.error('无效扩展 ID')
+    try:
+        args.report = resolve_default_file(args.report, 'plugin-probe.json')
+    except (OSError, ValueError) as error:
+        print('数据目录准备失败：', error)
+        return 1
     report = {'stage': 'A', 'status': 'manual_required', 'product_url': source,
               'product_id': product_id, 'extension_id': args.extension_id,
               'automation_feasibility': 'not_validated',

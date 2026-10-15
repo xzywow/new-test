@@ -2,6 +2,7 @@
 import argparse
 import json
 from pathlib import Path
+from data_paths import resolve_default_file
 from import_rules import SkuRegistry, export_import, validate_record
 
 
@@ -9,8 +10,8 @@ def main():
     parser = argparse.ArgumentParser(description='生成店小秘模板导入文件，仅本地操作')
     parser.add_argument('--template', type=Path, required=True)
     parser.add_argument('--input', type=Path, required=True, help='UTF-8 JSON 商品数组')
-    parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--db', type=Path, default=Path('output/sku-registry.sqlite3'))
+    parser.add_argument('--output', type=Path, help='默认数据目录内的 dxm-import.xlsx；不覆盖已有文件')
+    parser.add_argument('--db', type=Path, help='默认 Windows D 盘业务数据目录')
     args = parser.parse_args()
     registry = None
     try:
@@ -28,7 +29,8 @@ def main():
                 raise ValueError(f'第{index}条：' + '；'.join(errors))
             if record.get('SKU'):
                 raise ValueError('本命令自动分配日期 SKU，请省略输入中的 SKU；现有 SKU 修改需另做映射确认')
-        args.db.parent.mkdir(parents=True, exist_ok=True)
+        args.db = resolve_default_file(args.db, 'sku-registry.sqlite3')
+        args.output = resolve_default_file(args.output, 'dxm-import.xlsx')
         registry = SkuRegistry(args.db)
         for record in records:
             record['SKU'] = registry.assign(record['record_key'])

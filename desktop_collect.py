@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 from dianxiaomi_reader import source_identity
+from data_paths import resolve_default_file
 
 SUCCESS = '采集成功'
 BLOCKERS = ('验证码', '人机验证', '安全验证', 'captcha', 'verify you are human', '采集失败', '登录失效')
@@ -246,7 +247,7 @@ def main():
     parser.add_argument('--clear-confirmed-no-click', action='store_true', help='仅解除人工确认从未点击的旧待核验记录，不执行采集')
     parser.add_argument('--verify-only', action='store_true', help='未知结果先核验，不点击插件')
     parser.add_argument('--timeout', type=int, default=30)
-    parser.add_argument('--db', type=Path, default=Path('output/desktop-attempts.sqlite3'))
+    parser.add_argument('--db', type=Path, help='数据库路径，Windows 默认 D:\\店小秘数据\\desktop-attempts.sqlite3')
     args = parser.parse_args()
     _, product_id = source_identity(args.product_url or '')
     if not args.diagnose and (not product_id or not args.product_url.startswith('https://')):
@@ -269,7 +270,7 @@ def main():
             time.sleep(args.switch_seconds)
             print(json.dumps(chrome.diagnose(), ensure_ascii=False, indent=2))
             return 0
-        args.db.parent.mkdir(parents=True, exist_ok=True)
+        args.db = resolve_default_file(args.db, 'desktop-attempts.sqlite3')
         ledger = AttemptLedger(args.db)
         if args.clear_confirmed_no_click:
             ledger.clear_confirmed_no_click(product_id)
