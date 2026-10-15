@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright
 from chrome_diagnostics import find_chrome, inspect_extension, validate_endpoint, EXTENSION_ID
 from dianxiaomi_reader import source_identity
+from extension_package import prepare_extension
 
 
 def exact_source_matches(rows, expected_id):
@@ -105,6 +106,7 @@ def run_session(context, args, report):
 def main():
     parser = argparse.ArgumentParser(description='阶段 A：Windows Chrome 官方插件本地诊断（人工单商品采集）')
     parser.add_argument('--extension-id', required=True)
+    parser.add_argument('--crx', type=Path, help='本地 dxm_crawl_2.8.88.crx；校验解包后首次需要人工加载')
     parser.add_argument('--product-url', required=True)
     parser.add_argument('--rows', default='table tbody tr', help='实际采集箱商品行 CSS 选择器')
     parser.add_argument('--endpoint', help='明确授权复用的本机 Chrome CDP 地址；不会读取或复制个人浏览器目录')
@@ -122,6 +124,13 @@ def main():
     process = None
     profile = None
     try:
+        if args.crx:
+            extension_path, metadata = prepare_extension(
+                args.crx, args.extension_id, Path(__file__).parent / '.local-extensions')
+            report['extension_package'] = metadata
+            print('CRX 已校验并解包，未静默安装。')
+            print('首次：在 chrome://extensions 启用开发者模式 → 加载已解压的扩展程序，选择：')
+            print(extension_path)
         if args.endpoint:
             endpoint = validate_endpoint(args.endpoint)
         else:
@@ -149,7 +158,7 @@ def main():
         # No raw exceptions/URLs/HTML: these may carry session credentials.
         report.update(status='manual_required', reason='diagnostic_interrupted_or_browser_unavailable',
                       error_type=type(error).__name__)
-        print('诊断未完成：检查 Chrome、端口、页面选择和 CSS；未知结果请先人工核验，不要重复采集。')
+        print('诊断未完成：检查安装包是否为原始 2.8.88、扩展 ID、Chrome、端口、页面选择和 CSS；未知结果请先人工核验，不要重复采集。')
     finally:
         if profile is not None:
             report['extension_files'] = inspect_extension(profile, args.extension_id)

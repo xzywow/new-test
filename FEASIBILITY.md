@@ -27,3 +27,11 @@
 ## 本次云端验证结果
 
 `PLAYWRIGHT_EXECUTABLE_PATH=/usr/bin/chromium .venv/bin/python -m unittest discover -s tests -v`：14 项全部通过，包含 7 项原测试及 7 项诊断测试。真实系统 Chromium 运行的是拦截路由提供的模拟 HTML；Windows 检测和交互流程使用 mock。命令行帮助、Python 编译与 Git 空白检查通过。未执行真实官方扩展的采集动作，未验证 Windows GUI/CDP 与该插件组合；没有采集真实商品。
+
+## 提供的 CRX 包检查
+
+已在云端检查用户提供的 `dxm_crawl_2.8.88.crx`：CRX3，清单名称“店小秘助手”，版本 2.8.88，Manifest V3；manifest 公钥推导 ID 为 `ioadaikpljilagoddljnamloiebcoopb`。已对原始文件进行 SHA-256 固定校验、安全路径检查并实际解包，未改动包内代码。该校验只保证与提供附件一致，不证明官方来源，不声称验证过 CRX 数字签名。Windows Chrome 加载、插件启用及真实商品采集仍未验证。
+
+新增 `extension_package.py` 与 `plugin_probe.py --crx`，提供自动准备、首次人工“加载已解压的扩展程序”的流程；不将解包状态当成安装成功。没有使用 Chrome 策略、隐藏安装接口或强制覆盖。未来如需全自动加载，应单独验证支持扩展启动参数的 Chromium/Chrome for Testing 及该插件兼容性，本次不默认为正式 Chrome 支持。
+
+本轮完整回归共 18 项通过（新增未知包拒绝、身份不符拒绝、不安全路径拒绝、重复准备及篡改文件拒绝测试）；原始附件实际校验/解包及重复准备成功。测试没有安装或运行真实插件。

@@ -98,3 +98,28 @@ py -3 -m venv .venv
 ```
 
 测试包含模拟 Windows Chrome 检测、扩展清单元数据、CDP 地址限制和本地 HTML 核验。不包含真实 Windows 桌面、官方扩展、真实账号或采集操作；不得把测试通过解释为已采集真实商品。
+
+### 使用提供的店小秘 2.8.88 CRX 安装包
+
+正式版 Chrome 不提供可靠的本地 CRX 静默安装方式，较新版本还限制 `--load-extension` 启动参数。工具不修改 Chrome 策略、Preferences 或安装记录；新增的是**自动校验和解包，首次人工加载**。已有登录记录和安装状态继续由同一独立 Chrome 保存。
+
+将原始 `dxm_crawl_2.8.88.crx` 放在项目目录，关闭先前启动的独立 Chrome，在 PowerShell 执行：
+
+```powershell
+git pull --ff-only
+.\.venv\Scripts\python.exe plugin_probe.py --crx ".\dxm_crawl_2.8.88.crx" --extension-id "ioadaikpljilagoddljnamloiebcoopb" --product-url "https://www.aliexpress.com/item/1005012488453051.html"
+```
+
+首次启动后，在独立 Chrome 的 `chrome://extensions` 页面打开右上角“开发者模式”，点击“加载已解压的扩展程序”，选择终端打印的完整目录（位于项目 `.local-extensions` 内的校验和目录，不能选择 CRX 文件或其父目录）。核对名称“店小秘助手”、版本 2.8.88、ID 及启用状态，再回终端按 Enter。若安装了相同 ID 的另一个版本，先停止并检查，不自动卸载或覆盖。
+
+如果当前诊断程序仍在等待，可以打开另一个 PowerShell，进入项目目录，仅执行解包：
+
+```powershell
+.\.venv\Scripts\python.exe extension_package.py --crx ".\dxm_crawl_2.8.88.crx"
+```
+
+随后在已经打开的独立 Chrome 中人工加载打印出的目录，再回原终端继续。此命令只准备文件，不启动或操纵浏览器。
+
+包内为 Manifest V3，公钥推导 ID 与上述 ID 一致。只接受本次提供的原始文件 SHA-256：`d76762adb53085d44f75e53e5b54ff0db769211942521889d30583ca44e6c6ac`。校验用于确保文件与已检查附件相同，**不是官方来源证明，也不是 CRX 签名认证**；官方来源仍需用户核对。工具不更改 manifest 或扩展代码来绕过验证。不同版本或改动后的文件会拒绝；已解包文件若变化也拒绝复用。不要手改校验和来放行未知包。
+
+安装包、解包目录均保留在本机并由 Git 忽略，不随代码发布，因此更新代码不会自动下载插件。此扩展自身申请 cookies、webRequest 等权限，具体权限需在 Chrome 中由用户审阅；本工具不读取凭据。解包加载后的更新、权限及后台行为由 Chrome 和扩展管理，不代表已经验证采集兼容性。保留解包目录，否则后续启动扩展可能无法加载。
