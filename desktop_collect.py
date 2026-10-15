@@ -229,7 +229,7 @@ def main():
     parser = argparse.ArgumentParser(description='Windows 当前 Chrome 单商品采集试验；首次只处理一个商品')
     parser.add_argument('--product-url')
     parser.add_argument('--diagnose', action='store_true', help='只读检查当前 Chrome 可访问性，不点击或写入任务')
-    parser.add_argument('--switch-seconds', type=int, default=10, help='切换窗口等待秒数，默认10')
+    parser.add_argument('--switch-seconds', type=int, default=5, help='切换窗口等待秒数，默认5')
     parser.add_argument('--skip-source-verification', action='store_true', help='插件成功提示后结束，保留待核验状态')
     parser.add_argument('--verify-only', action='store_true', help='未知结果先核验，不点击插件')
     parser.add_argument('--timeout', type=int, default=30)
@@ -257,8 +257,7 @@ def main():
         ledger = AttemptLedger(args.db)
         if not args.verify_only:
             print('请先在采集箱确认该商品尚未存在。已存在的商品请改用 --verify-only。')
-            if input('仅授权一次“开始采集”点击请输入 COLLECT：').strip().upper() != 'COLLECT':
-                raise StopOperation('未授权点击，已退出。')
+            print('本命令将直接尝试采集一次，不再要求输入 COLLECT。')
             print(f'请在 {args.switch_seconds} 秒内切换到目标商品的 Chrome 标签页；倒计时后不要操作鼠标键盘。')
             time.sleep(args.switch_seconds)
             # Persist UNKNOWN before any attempted click. Even a crash cannot cause an automatic retry.

@@ -103,10 +103,12 @@ class DesktopTests(unittest.TestCase):
     def test_skip_source_verification_keeps_unverified(self):
         import sys
         from desktop_collect import main
-        with tempfile.TemporaryDirectory() as tmp, patch('desktop_collect.WindowsChrome') as cls, patch('builtins.input', return_value='collect'), patch('desktop_collect.time.sleep'):
+        with tempfile.TemporaryDirectory() as tmp, patch('desktop_collect.WindowsChrome') as cls, patch('builtins.input', side_effect=AssertionError('不得要求输入确认')) as prompt, patch('desktop_collect.time.sleep') as sleep:
             path = Path(tmp) / 'attempts.sqlite3'
             with patch.object(sys, 'argv', ['desktop_collect.py', '--product-url', 'https://www.aliexpress.com/item/123.html', '--skip-source-verification', '--db', str(path)]):
                 self.assertEqual(main(), 0)
+            prompt.assert_not_called()
+            sleep.assert_called_once_with(5)
             cls.return_value.click_once.assert_called_once_with('123')
             cls.return_value.verify_source.assert_not_called()
             ledger = AttemptLedger(path)
