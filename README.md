@@ -168,3 +168,21 @@ git pull --ff-only
 每个商品的尝试在点击前写入本地 `output/desktop-attempts.sqlite3`，即使中断、点击前检查失败或崩溃，后续也拒绝自动重复点击。先人工核验，不要删库强行重试。标记 `verified_present` 只证明当前店小秘可见来源匹配，不保证是此次新建，也不保证历史未重复。此功能一次只处理一个商品、不并发，SQLite 文件需要保留。
 
 Ctrl+C 可在终端中断，操作系统可切走 Chrome 让后续检查停止；这不是全局紧急停止键，已发出的点击无法撤回。保持 Windows 解锁，终端与 Chrome 以同等权限运行（推荐均普通权限），不要在锁屏或远程会话断开时运行。
+
+### 跳过采集箱来源核验及窗口诊断
+
+按当前用户要求，可在命令末尾增加 `--skip-source-verification`，程序读取插件“采集成功”提示后结束，不要求进入采集箱。任务保存为 `plugin_success_unverified`，不是已核验成功，后续也不会自动再次点击。不能与 `--verify-only` 同用；仍保留前台 Chrome、地址栏、目标商品和按钮检查。
+
+```powershell
+.\.venv\Scripts\python.exe desktop_collect.py --product-url "https://www.aliexpress.com/item/替换为新商品ID.html" --skip-source-verification
+```
+
+确认词兼容 `COLLECT` 和 `collect`。窗口切换时间现默认为 10 秒，可用 `--switch-seconds 15` 调整。此前文档中的 5 秒说明对应旧版。
+
+若提示无法读取地址栏，先运行只读诊断（不点击、不写任务）：
+
+```powershell
+.\.venv\Scripts\python.exe desktop_collect.py --diagnose
+```
+
+执行后在 10 秒内切到目标 Chrome 页面。输出只含控件数量、类型、是否识别地址栏及网站类别，不包含地址、账号或表单内容。可以把终端输出发来继续适配。新版支持浏览器原生工具栏内的 Edit/ComboBox 地址栏定位，拒绝网页模仿的地址输入框。若仍无法识别，不跳过安全检查或猜坐标点击。推荐终端与 Chrome 均以普通用户权限运行。

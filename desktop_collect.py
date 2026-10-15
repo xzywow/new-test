@@ -88,14 +88,72 @@ class WindowsChrome:
             raise StopOperation('页面控件过多，停止自动操作。')
         return [control for control in controls if control.is_visible()]
 
+    def native_toolbar_control(self, root, control):
+        """Reject page-created fields even if they imitate the omnibox label."""
+        root_id = root.element_info.runtime_id
+        current = control
+        toolbar = False
+        for _ in range(20):
+            if current is None:
+                return False, False
+            if current.element_info.runtime_id == root_id:
+                return True, toolbar
+            kind = current.element_info.control_type
+            if kind == 'Document':
+                return False, False
+            toolbar = toolbar or kind == 'ToolBar'
+            current = current.parent()
+        return False, False
+
     def address(self, root, controls):
-        addresses = []
+        preferred, fallback = set(), set()
         for control in controls:
-            if control.element_info.control_type == 'Edit' and control.window_text() in ADDRESS_NAMES:
-                addresses.append(control.get_value())
+            if control.element_info.control_type not in {'Edit', 'ComboBox'}:
+                continue
+            native, toolbar = self.native_toolbar_control(root, control)
+            if not native:
+                continue
+            named = control.window_text().strip() in ADDRESS_NAMES
+            if not named and not toolbar:
+                continue
+            try:
+                # Some UIA ComboBox wrappers expose ValuePattern but not get_value.
+                value = control.iface_value.CurrentValue
+                address = normalized_address(value)
+                parsed = urlsplit(address)
+                if parsed.scheme not in {'http', 'https'} or not parsed.hostname or '.' not in parsed.hostname:
+                    continue
+                (preferred if named else fallback).add(address)
+            except Exception:
+                continue
+        addresses = preferred or fallback
         if len(addresses) != 1:
-            raise StopOperation('无法唯一读取 Chrome 地址栏；不进行点击。请确认 Chrome 可访问性支持。')
-        return normalized_address(addresses[0])
+            raise StopOperation('无法唯一读取 Chrome 地址栏；请先运行 --diagnose，不进行点击。')
+        return addresses.pop()
+
+    def diagnose(self):
+        root = self.foreground()
+        controls = self.controls(root)
+        edits = []
+        for control in controls:
+            if control.element_info.control_type not in {'Edit', 'ComboBox'}:
+                continue
+            native, toolbar = self.native_toolbar_control(root, control)
+            if native:
+                edits.append({'type': control.element_info.control_type,
+                              'known_address_label': control.window_text().strip() in ADDRESS_NAMES,
+                              'in_toolbar': toolbar})
+        result = {'visible_control_count': len(controls), 'native_edit_controls': edits}
+        try:
+            address = self.address(root, controls)
+            host = (urlsplit(address).hostname or '').lower()
+            result['address_readable'] = True
+            result['page_family'] = ('dianxiaomi' if host == 'dianxiaomi.com' or host.endswith('.dianxiaomi.com')
+                                     else 'aliexpress' if host == 'aliexpress.com' or host.endswith('.aliexpress.com') else 'other')
+        except StopOperation:
+            result['address_readable'] = False
+        # Only booleans/counts/fixed categories. No URLs, titles, form values or account data.
+        return result
 
     def snapshot(self):
         root = self.foreground()
@@ -169,36 +227,53 @@ class WindowsChrome:
 
 def main():
     parser = argparse.ArgumentParser(description='Windows 当前 Chrome 单商品采集试验；首次只处理一个商品')
-    parser.add_argument('--product-url', required=True)
+    parser.add_argument('--product-url')
+    parser.add_argument('--diagnose', action='store_true', help='只读检查当前 Chrome 可访问性，不点击或写入任务')
+    parser.add_argument('--switch-seconds', type=int, default=10, help='切换窗口等待秒数，默认10')
+    parser.add_argument('--skip-source-verification', action='store_true', help='插件成功提示后结束，保留待核验状态')
     parser.add_argument('--verify-only', action='store_true', help='未知结果先核验，不点击插件')
     parser.add_argument('--timeout', type=int, default=30)
     parser.add_argument('--db', type=Path, default=Path('output/desktop-attempts.sqlite3'))
     args = parser.parse_args()
-    _, product_id = source_identity(args.product_url)
-    if not product_id or not args.product_url.startswith('https://'):
+    _, product_id = source_identity(args.product_url or '')
+    if not args.diagnose and (not product_id or not args.product_url.startswith('https://')):
         parser.error('需要 HTTPS 速卖通商品详情 URL')
+    if not 3 <= args.switch_seconds <= 60:
+        parser.error('--switch-seconds 必须在 3 到 60 秒之间')
     if not 1 <= args.timeout <= 120:
         parser.error('--timeout 必须在 1 到 120 秒之间')
+    if args.skip_source_verification and args.verify_only:
+        parser.error('--skip-source-verification 不能与 --verify-only 同用')
     ledger = None
     try:
         chrome = WindowsChrome()
+        if args.diagnose:
+            import json
+            print(f'请在 {args.switch_seconds} 秒内切到目标 Chrome 页面。只检查，不点击。')
+            time.sleep(args.switch_seconds)
+            print(json.dumps(chrome.diagnose(), ensure_ascii=False, indent=2))
+            return 0
         args.db.parent.mkdir(parents=True, exist_ok=True)
         ledger = AttemptLedger(args.db)
         if not args.verify_only:
             print('请先在采集箱确认该商品尚未存在。已存在的商品请改用 --verify-only。')
-            if input('仅授权一次“开始采集”点击请输入 COLLECT：').strip() != 'COLLECT':
+            if input('仅授权一次“开始采集”点击请输入 COLLECT：').strip().upper() != 'COLLECT':
                 raise StopOperation('未授权点击，已退出。')
-            print('请在 5 秒内切换到目标商品的 Chrome 标签页；倒计时后不要操作鼠标键盘。Ctrl+C 可中断终端。')
-            time.sleep(5)
+            print(f'请在 {args.switch_seconds} 秒内切换到目标商品的 Chrome 标签页；倒计时后不要操作鼠标键盘。')
+            time.sleep(args.switch_seconds)
             # Persist UNKNOWN before any attempted click. Even a crash cannot cause an automatic retry.
             ledger.claim(product_id)
             chrome.click_once(product_id)
             chrome.wait_success(product_id, args.timeout)
             print('已读取插件成功提示，尚未核验入箱。')
+            if args.skip_source_verification:
+                ledger.status(product_id, 'plugin_success_unverified')
+                print('已按要求跳过来源核验：插件提示成功，入箱未核验。此商品不会自动重复点击。')
+                return 0
         print('请在原 Chrome 中手动进入店小秘采集箱，按来源 ID 搜索并打开该商品详情。不要保存或认领。')
         print('待核验来源 ID：', product_id)
-        input('准备好后回终端按 Enter，再在 5 秒内切回该店小秘详情页：')
-        time.sleep(5)
+        input(f'准备好后回终端按 Enter，再在 {args.switch_seconds} 秒内切回该店小秘详情页：')
+        time.sleep(args.switch_seconds)
         if not chrome.verify_source(product_id):
             raise StopOperation('未找到精确来源 ID，保持待核验；不要重复采集。')
         ledger.status(product_id, 'verified_present')

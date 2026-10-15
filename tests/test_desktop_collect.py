@@ -75,3 +75,42 @@ class DesktopTests(unittest.TestCase):
         chrome.snapshot.return_value = (Mock(), [field], 'https://example.com/', ['来源URL：'])
         with self.assertRaises(StopOperation):
             chrome.verify_source('123')
+
+    def test_native_address_fallback_and_page_field_rejection(self):
+        chrome = object.__new__(WindowsChrome)
+        root = Mock()
+        root.element_info.runtime_id = [1]
+        root.element_info.control_type = 'Window'
+        toolbar = Mock()
+        toolbar.element_info.runtime_id = [2]
+        toolbar.element_info.control_type = 'ToolBar'
+        toolbar.parent.return_value = root
+        address = control('localized unknown label', 'Edit')
+        address.element_info.runtime_id = [3]
+        address.parent.return_value = toolbar
+        address.iface_value.CurrentValue = 'www.dianxiaomi.com/edit'
+        document = Mock()
+        document.element_info.runtime_id = [4]
+        document.element_info.control_type = 'Document'
+        spoof = control('Address and search bar', 'Edit')
+        spoof.element_info.runtime_id = [5]
+        spoof.parent.return_value = document
+        spoof.iface_value.CurrentValue = 'www.aliexpress.com/item/123.html'
+        self.assertEqual(chrome.address(root, [address, spoof]), 'https://www.dianxiaomi.com/edit')
+        with self.assertRaises(StopOperation):
+            chrome.address(root, [spoof])
+
+    def test_skip_source_verification_keeps_unverified(self):
+        import sys
+        from desktop_collect import main
+        with tempfile.TemporaryDirectory() as tmp, patch('desktop_collect.WindowsChrome') as cls, patch('builtins.input', return_value='collect'), patch('desktop_collect.time.sleep'):
+            path = Path(tmp) / 'attempts.sqlite3'
+            with patch.object(sys, 'argv', ['desktop_collect.py', '--product-url', 'https://www.aliexpress.com/item/123.html', '--skip-source-verification', '--db', str(path)]):
+                self.assertEqual(main(), 0)
+            cls.return_value.click_once.assert_called_once_with('123')
+            cls.return_value.verify_source.assert_not_called()
+            ledger = AttemptLedger(path)
+            self.assertEqual(ledger.db.execute('SELECT status FROM attempts').fetchone()[0], 'plugin_success_unverified')
+            with self.assertRaises(StopOperation):
+                ledger.claim('123')
+            ledger.close()
