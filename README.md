@@ -51,3 +51,50 @@ python -m compileall -q .
 测试使用本地 HTML 和无头 Chromium 验证可见行解析、分页、去重、导出与请求拦截，不访问真实店小秘。真实账号登录、真实页面选择器以及 Windows 桌面端仍需用户本机验证。不要将测试通过理解为真实商品已采集成功。
 
 云环境验证：安装依赖成功；浏览器下载域名被网络策略阻止，因此实际浏览器测试使用已安装的系统 Chromium，命令为 `PLAYWRIGHT_EXECUTABLE_PATH=/usr/bin/chromium .venv/bin/python -m unittest discover -s tests -v`。如使用已有 Chrome/Chromium，可通过 `PLAYWRIGHT_EXECUTABLE_PATH` 指定可执行文件；Windows 默认使用上面命令安装的 Playwright Chromium。
+
+## 新重点：阶段 A 官方插件可行性诊断
+
+此阶段只验证一个商品；不执行整店采集。详见 [FEASIBILITY.md](FEASIBILITY.md)。原 `main.py` 保留为独立的只读导出工具。
+
+### Windows PowerShell 步骤
+
+1. 安装 Google Chrome 和 Python 3.10+。在仓库运行以下命令更新并安装依赖：
+
+```powershell
+git switch main
+git pull --ff-only
+py -3 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+2. 从店小秘官网指向的官方来源安装/确认扩展。打开 `chrome://extensions`，启用开发者模式以查看扩展 ID，确认启用。不要安装同名未知扩展。
+3. 用真实的扩展 ID 和一个尚未采集的速卖通商品 URL 替换下面示例。工具会检测 Chrome，启动独立浏览器；首次需要在这个独立浏览器里重新从官方来源安装扩展，不复制原浏览器个人资料。
+
+```powershell
+.\.venv\Scripts\python.exe plugin_probe.py --extension-id "替换为32位扩展ID" --product-url "https://www.aliexpress.com/item/替换为商品数字ID.html"
+```
+
+4. 按终端提示手动登录、完成验证、打开目标商品和采集箱。查看插件页面入口/工具栏弹窗，记录是单品还是批量。若有验证码或未知弹窗，停止，不绕过。
+5. 在采集箱按目标来源 ID 搜索，先读基线。已有商品会跳过。确认后只通过官方插件手动采集一个商品，再手动刷新/搜索采集箱，由程序核对来源链接 ID。无唯一来源链接会保持待核验。若真实商品行不是表格，用 `--rows "实际商品行CSS选择器"` 指定，确保选中单条商品容器而非整页。
+6. 查看 `output/plugin-probe.json`。只有真实核验后才能讨论进一步自动化。可随时 Ctrl+C 停止；浏览器由你手动关闭。不要在未知结果下直接重试采集。
+
+### 复用已授权 Chrome
+
+优先支持 `--endpoint http://127.0.0.1:端口` 连接用户明确授权的调试浏览器，不自动扫描调试端口，不连接远程机器。Chrome 136+ 通常不允许在默认个人数据目录启用远程调试；普通正在运行的 Chrome 无法可靠直接接管。不要复制其资料或强制关闭个人 Chrome。默认独立目录是更可靠的退路。
+
+如果你已经手动启动了一个独立目录 Chrome 调试实例，可使用：
+
+```powershell
+.\.venv\Scripts\python.exe plugin_probe.py --endpoint "http://127.0.0.1:9223" --extension-id "替换为32位扩展ID" --product-url "https://www.aliexpress.com/item/替换为商品数字ID.html"
+```
+
+调试端口拥有较高浏览器访问权限，只绑定本机，使用后关闭浏览器，不要暴露给网络。不记录 endpoint、页面 URL 列表、网页内容或凭据。默认报告只保存商品 URL 的规范化形式，去掉查询串。截图未自动采集，避免意外包含账号信息。独立浏览器文件位于 `.diagnostic-chrome/`，不提交 Git。
+
+### 测试范围
+
+```powershell
+.\.venv\Scripts\python.exe -m playwright install chromium
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+测试包含模拟 Windows Chrome 检测、扩展清单元数据、CDP 地址限制和本地 HTML 核验。不包含真实 Windows 桌面、官方扩展、真实账号或采集操作；不得把测试通过解释为已采集真实商品。

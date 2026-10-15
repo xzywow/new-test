@@ -3,3 +3,4 @@ __pycache__/
 .browser-profile/
 output/
 *.log
+.diagnostic-chrome/
