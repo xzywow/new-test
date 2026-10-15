@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, patch, ANY
 from desktop_collect import AttemptLedger, WindowsChrome, StopOperation, exact_product, inspect_texts
 
 
@@ -109,10 +109,44 @@ class DesktopTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             prompt.assert_not_called()
             sleep.assert_called_once_with(5)
-            cls.return_value.click_once.assert_called_once_with('123')
+            cls.return_value.click_once.assert_called_once_with('123', before_click=ANY)
             cls.return_value.verify_source.assert_not_called()
             ledger = AttemptLedger(path)
             self.assertEqual(ledger.db.execute('SELECT status FROM attempts').fetchone()[0], 'plugin_success_unverified')
             with self.assertRaises(StopOperation):
                 ledger.claim('123')
+            ledger.close()
+
+    def test_preflight_failure_does_not_reserve_attempt(self):
+        button = control('开始采集')
+        chrome = self.make_chrome([button], url='https://example.com/')
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = AttemptLedger(Path(tmp) / 'db.sqlite3')
+            with self.assertRaises(StopOperation):
+                chrome.click_once('123', before_click=lambda: ledger.claim('123'))
+            self.assertIsNone(ledger.db.execute('SELECT status FROM attempts').fetchone())
+            button.click_input.assert_not_called()
+            ledger.close()
+
+    def test_reservation_precedes_click(self):
+        button = control('开始采集')
+        chrome = self.make_chrome([button])
+        chrome.desktop.from_point.return_value = button
+        events = []
+        button.click_input.side_effect = lambda: events.append('click')
+        chrome.click_once('123', before_click=lambda: events.append('reserve'))
+        self.assertEqual(events, ['reserve', 'click'])
+
+    def test_only_explicit_no_click_attestation_can_release_legacy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = AttemptLedger(Path(tmp) / 'db.sqlite3')
+            ledger.claim('123')
+            ledger.clear_confirmed_no_click('123')
+            ledger.claim('123')
+            ledger.status('123', 'plugin_success_unverified')
+            with self.assertRaises(StopOperation):
+                ledger.clear_confirmed_no_click('123')
+            ledger.status('123', 'verified_present')
+            with self.assertRaises(StopOperation):
+                ledger.clear_confirmed_no_click('123')
             ledger.close()

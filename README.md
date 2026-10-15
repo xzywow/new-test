@@ -190,3 +190,15 @@ Ctrl+C 可在终端中断，操作系统可切走 Chrome 让后续检查停止�
 ### 最新启动方式：5 秒后直接执行
 
 按用户当前要求，默认窗口切换时间恢复为 5 秒，采集命令不再询问 `COLLECT`。显式 `--switch-seconds` 仍可覆盖。请先打开并加载目标商品页，再执行 `desktop_collect.py --product-url "实际商品链接" --skip-source-verification`，5 秒内切回 Chrome。运行命令即开始一次采集尝试；保留地址栏、按钮、焦点、防重复和异常停止检查。此前关于默认 10 秒和输入 collect 的说明已被此规则替代。非跳过模式仍需人工打开店小秘详情并按 Enter 开始来源核验。
+
+### 旧版“前台不是 Chrome”后记录误锁定修复
+
+新版把写入待核验记录的时机移至地址栏、按钮、焦点和覆盖检查全部通过之后、实际点击之前。因此新版在检查阶段停止不会误记采集尝试；实际点击已尝试或结果未知时仍保留记录、防止重复。
+
+旧版可能在尚未点击时就留下 `pending_verification`。只有明确看到旧运行在“前台不是 Chrome”等点击前检查处停止，并人工确认没有点击/入箱的情况下，才能对该一个商品执行：
+
+```powershell
+.\.venv\Scripts\python.exe desktop_collect.py --product-url "https://www.aliexpress.com/item/1005012087206250.html" --clear-confirmed-no-click
+```
+
+此命令仅将指定商品记录标记为“人工确认未点击”，不执行采集、不删除其他任务、不放行成功状态。再运行正常采集命令。超时、崩溃、已点击但无成功提示等情况不能用它解除，应先核验。无需删除数据库。执行采集命令后须在 5 秒内 Alt+Tab 切到目标 Chrome 商品页；停留在 PowerShell 会被正确拦截。

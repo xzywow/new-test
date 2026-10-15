@@ -27,13 +27,23 @@ class AttemptLedger:
         try:
             self.db.execute('BEGIN IMMEDIATE')
             existing = self.db.execute('SELECT status FROM attempts WHERE product_id=?', (product_id,)).fetchone()
-            if existing:
+            if existing and existing[0] != 'confirmed_no_click':
                 raise StopOperation('该商品已有操作记录；请使用 --verify-only 先核验，不自动重复点击。')
-            self.db.execute('INSERT INTO attempts(product_id,status) VALUES (?,?)', (product_id, 'pending_verification'))
+            self.db.execute('INSERT INTO attempts(product_id,status) VALUES (?,?) ON CONFLICT(product_id) DO UPDATE SET status=excluded.status, updated=CURRENT_TIMESTAMP', (product_id, 'pending_verification'))
             self.db.commit()
         except BaseException:
             self.db.rollback()
             raise
+
+    def clear_confirmed_no_click(self, product_id):
+        # Explicit operator attestation only for legacy preflight failures.
+        # Preserve the record rather than erase all attempt history.
+        with self.db:
+            row = self.db.execute('SELECT status FROM attempts WHERE product_id=?', (product_id,)).fetchone()
+            if not row or row[0] != 'pending_verification':
+                raise StopOperation('只能解除已确认未点击的旧待核验记录；不会解除成功或其他状态。')
+            self.db.execute('UPDATE attempts SET status=?, updated=CURRENT_TIMESTAMP WHERE product_id=?',
+                            ('confirmed_no_click', product_id))
 
     def status(self, product_id, status):
         self.db.execute('INSERT INTO attempts(product_id,status) VALUES (?,?) ON CONFLICT(product_id) DO UPDATE SET status=excluded.status, updated=CURRENT_TIMESTAMP', (product_id, status))
@@ -166,7 +176,7 @@ class WindowsChrome:
             raise StopOperation('检测到子窗口或弹窗，停止自动操作。')
         return root, controls, address, texts
 
-    def click_once(self, product_id):
+    def click_once(self, product_id, before_click=None):
         root, controls, address, texts = self.snapshot()
         if not exact_product(address, product_id):
             raise StopOperation('前台地址栏不是指定速卖通商品，不进行点击。')
@@ -189,6 +199,8 @@ class WindowsChrome:
             raise StopOperation('按钮被其他元素覆盖，停止点击。')
         if self.win32gui.GetForegroundWindow() != root.handle:
             raise StopOperation('窗口焦点发生变化，停止点击。')
+        if before_click is not None:
+            before_click()
         button.click_input()
 
     def wait_success(self, product_id, timeout):
@@ -231,6 +243,7 @@ def main():
     parser.add_argument('--diagnose', action='store_true', help='只读检查当前 Chrome 可访问性，不点击或写入任务')
     parser.add_argument('--switch-seconds', type=int, default=5, help='切换窗口等待秒数，默认5')
     parser.add_argument('--skip-source-verification', action='store_true', help='插件成功提示后结束，保留待核验状态')
+    parser.add_argument('--clear-confirmed-no-click', action='store_true', help='仅解除人工确认从未点击的旧待核验记录，不执行采集')
     parser.add_argument('--verify-only', action='store_true', help='未知结果先核验，不点击插件')
     parser.add_argument('--timeout', type=int, default=30)
     parser.add_argument('--db', type=Path, default=Path('output/desktop-attempts.sqlite3'))
@@ -244,7 +257,10 @@ def main():
         parser.error('--timeout 必须在 1 到 120 秒之间')
     if args.skip_source_verification and args.verify_only:
         parser.error('--skip-source-verification 不能与 --verify-only 同用')
+    if args.clear_confirmed_no_click and (args.verify_only or args.diagnose or args.skip_source_verification):
+        parser.error('--clear-confirmed-no-click 必须单独使用，只处理记录，不采集')
     ledger = None
+    attempt_started = False
     try:
         chrome = WindowsChrome()
         if args.diagnose:
@@ -255,14 +271,21 @@ def main():
             return 0
         args.db.parent.mkdir(parents=True, exist_ok=True)
         ledger = AttemptLedger(args.db)
+        if args.clear_confirmed_no_click:
+            ledger.clear_confirmed_no_click(product_id)
+            print('已标记为人工确认未点击，允许重新检查；本命令未执行采集。')
+            return 0
         if not args.verify_only:
             print('请先在采集箱确认该商品尚未存在。已存在的商品请改用 --verify-only。')
             print('本命令将直接尝试采集一次，不再要求输入 COLLECT。')
             print(f'请在 {args.switch_seconds} 秒内切换到目标商品的 Chrome 标签页；倒计时后不要操作鼠标键盘。')
             time.sleep(args.switch_seconds)
-            # Persist UNKNOWN before any attempted click. Even a crash cannot cause an automatic retry.
-            ledger.claim(product_id)
-            chrome.click_once(product_id)
+            # Reserve only after preflight checks, immediately BEFORE the actual click.
+            def reserve_attempt():
+                nonlocal attempt_started
+                ledger.claim(product_id)
+                attempt_started = True
+            chrome.click_once(product_id, before_click=reserve_attempt)
             chrome.wait_success(product_id, args.timeout)
             print('已读取插件成功提示，尚未核验入箱。')
             if args.skip_source_verification:
@@ -280,7 +303,10 @@ def main():
         return 0
     except StopOperation as error:
         print(str(error))
-        print('未完成时先人工检查；未知结果请使用 --verify-only，不自动重试。')
+        if not attempt_started and not args.verify_only and not args.clear_confirmed_no_click:
+            print('本次未发出点击；检查失败不会新建采集记录。已有的旧记录不自动清除。')
+        else:
+            print('未完成时先人工检查；未知结果请使用 --verify-only，不自动重试。')
         return 1
     except (Exception, KeyboardInterrupt) as error:
         print('已停止；异常类型：', type(error).__name__, '。不输出页面或账号内容；请先人工核验。')
