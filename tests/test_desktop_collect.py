@@ -182,3 +182,34 @@ class DesktopTests(unittest.TestCase):
             ledger.note_duplicate('123')
             self.assertEqual(ledger.db.execute('SELECT status FROM attempts').fetchone()[0], 'verified_present')
             ledger.close()
+
+    def test_text_only_plugin_label_can_be_clicked_with_hit_check(self):
+        text = control('开始采集', 'Text')
+        chrome = self.make_chrome([text])
+        chrome.desktop.from_point.return_value = text
+        self.assertEqual(chrome.click_once('123'), 'clicked')
+        text.click_input.assert_called_once()
+        duplicate = control('重复采集', 'Text')
+        chrome = self.make_chrome([duplicate])
+        self.assertEqual(chrome.click_once('123'), 'duplicate')
+        duplicate.click_input.assert_not_called()
+
+    def test_button_is_preferred_to_its_text_label(self):
+        button, text = control('开始采集'), control('开始采集', 'Text')
+        chrome = self.make_chrome([button, text])
+        chrome.desktop.from_point.return_value = button
+        chrome.click_once('123')
+        button.click_input.assert_called_once()
+        text.click_input.assert_not_called()
+
+    def test_diagnostic_only_reports_fixed_plugin_labels(self):
+        chrome = object.__new__(WindowsChrome)
+        root = Mock()
+        chrome.foreground = Mock(return_value=root)
+        chrome.controls = Mock(return_value=[control('开始采集', 'Text'), control('private account text', 'Text')])
+        chrome.address = Mock(return_value='https://www.aliexpress.com/item/123.html?secret=hidden')
+        result = chrome.diagnose()
+        self.assertEqual(result['diagnostic_version'], 2)
+        self.assertEqual(result['plugin_controls'], [{'label': '开始采集', 'type': 'Text', 'enabled': True}])
+        self.assertNotIn('secret', str(result))
+        self.assertNotIn('private account', str(result))

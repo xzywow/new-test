@@ -81,7 +81,7 @@ def inspect_texts(texts):
 
 def has_duplicate_button(controls, texts):
     return (any('采集到店小秘' in text for text in texts)
-            and any(c.element_info.control_type in {'Button', 'Hyperlink'}
+            and any(c.element_info.control_type in {'Button', 'Hyperlink', 'Text'}
                     and c.window_text().strip() == '重复采集' for c in controls))
 
 
@@ -167,7 +167,14 @@ class WindowsChrome:
                 edits.append({'type': control.element_info.control_type,
                               'known_address_label': control.window_text().strip() in ADDRESS_NAMES,
                               'in_toolbar': toolbar})
-        result = {'visible_control_count': len(controls), 'native_edit_controls': edits}
+        plugin_controls = []
+        for control in controls:
+            label = control.window_text().strip()
+            if label in {'开始采集', '重复采集', '采集到店小秘'}:
+                plugin_controls.append({'label': label, 'type': control.element_info.control_type,
+                                        'enabled': bool(control.is_enabled())})
+        result = {'diagnostic_version': 2, 'visible_control_count': len(controls),
+                  'native_edit_controls': edits, 'plugin_controls': plugin_controls}
         try:
             address = self.address(root, controls)
             host = (urlsplit(address).hostname or '').lower()
@@ -201,10 +208,14 @@ class WindowsChrome:
             raise StopOperation('已有采集成功提示，可能是旧结果；请先核验，不能重复点击。')
         if not any('采集到店小秘' in text for text in texts):
             raise StopOperation('未找到店小秘浮窗标识，不进行点击。')
-        candidates = [c for c in controls if c.window_text().strip() == '开始采集'
-                      and c.element_info.control_type in {'Button', 'Hyperlink'} and c.is_enabled()]
+        matching = [c for c in controls if c.window_text().strip() == '开始采集' and c.is_enabled()]
+        candidates = [c for c in matching if c.element_info.control_type in {'Button', 'Hyperlink'}]
+        if not candidates:
+            # Some extension DOM controls are exposed as Text, not Button.
+            # Still require one exact visible label and the live hit test below.
+            candidates = [c for c in matching if c.element_info.control_type == 'Text']
         if len(candidates) != 1:
-            raise StopOperation('无法唯一定位可操作的“开始采集”按钮；不会猜测坐标。')
+            raise StopOperation('无法唯一定位“开始采集”；请运行新版 --diagnose 并查看 plugin_controls，不会猜测坐标。')
         button = candidates[0]
         bounds = button.rectangle()
         if bounds.width() <= 0 or bounds.height() <= 0:
