@@ -50,6 +50,13 @@ class AttemptLedger:
         self.db.execute('INSERT INTO attempts(product_id,status) VALUES (?,?) ON CONFLICT(product_id) DO UPDATE SET status=excluded.status, updated=CURRENT_TIMESTAMP', (product_id, status))
         self.db.commit()
 
+    def note_duplicate(self, product_id):
+        self.db.execute("INSERT INTO attempts(product_id,status) VALUES (?, 'skipped_duplicate') "
+                        "ON CONFLICT(product_id) DO UPDATE SET "
+                        "status=CASE WHEN attempts.status='verified_present' THEN attempts.status ELSE excluded.status END, "
+                        "updated=CURRENT_TIMESTAMP", (product_id,))
+        self.db.commit()
+
     def close(self):
         self.db.close()
 
@@ -70,6 +77,12 @@ def inspect_texts(texts):
     if any(word.lower() in lowered for word in BLOCKERS):
         raise StopOperation('检测到验证或失败提示，已停止；请人工处理，不重复采集。')
     return SUCCESS in lowered
+
+
+def has_duplicate_button(controls, texts):
+    return (any('采集到店小秘' in text for text in texts)
+            and any(c.element_info.control_type in {'Button', 'Hyperlink'}
+                    and c.window_text().strip() == '重复采集' for c in controls))
 
 
 class WindowsChrome:
@@ -181,7 +194,10 @@ class WindowsChrome:
         root, controls, address, texts = self.snapshot()
         if not exact_product(address, product_id):
             raise StopOperation('前台地址栏不是指定速卖通商品，不进行点击。')
-        if inspect_texts(texts):
+        success = inspect_texts(texts)
+        if has_duplicate_button(controls, texts):
+            return 'duplicate'
+        if success:
             raise StopOperation('已有采集成功提示，可能是旧结果；请先核验，不能重复点击。')
         if not any('采集到店小秘' in text for text in texts):
             raise StopOperation('未找到店小秘浮窗标识，不进行点击。')
@@ -203,15 +219,19 @@ class WindowsChrome:
         if before_click is not None:
             before_click()
         button.click_input()
+        return 'clicked'
 
     def wait_success(self, product_id, timeout):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            _, _, address, texts = self.snapshot()
+            _, controls, address, texts = self.snapshot()
             if not exact_product(address, product_id):
                 raise StopOperation('等待期间离开目标商品页，结果未知，先核验。')
-            if inspect_texts(texts):
-                return
+            success = inspect_texts(texts)
+            if has_duplicate_button(controls, texts):
+                return 'duplicate'
+            if success:
+                return 'success'
             time.sleep(0.5)
         raise StopOperation('未在时限内读到成功提示；结果未知，先核验，不重试点击。')
 
@@ -277,7 +297,7 @@ def main():
             print('已标记为人工确认未点击，允许重新检查；本命令未执行采集。')
             return 0
         if not args.verify_only:
-            print('请先在采集箱确认该商品尚未存在。已存在的商品请改用 --verify-only。')
+            print('插件显示“重复采集”时跳过，不点击、不要求入箱核验。')
             print('本命令将直接尝试采集一次，不再要求输入 COLLECT。')
             print(f'请在 {args.switch_seconds} 秒内切换到目标商品的 Chrome 标签页；倒计时后不要操作鼠标键盘。')
             time.sleep(args.switch_seconds)
@@ -286,8 +306,14 @@ def main():
                 nonlocal attempt_started
                 ledger.claim(product_id)
                 attempt_started = True
-            chrome.click_once(product_id, before_click=reserve_attempt)
-            chrome.wait_success(product_id, args.timeout)
+            outcome = chrome.click_once(product_id, before_click=reserve_attempt)
+            if outcome != 'duplicate':
+                outcome = chrome.wait_success(product_id, args.timeout)
+            if outcome == 'duplicate':
+                ledger.note_duplicate(product_id)
+                print('已跳过：插件显示“重复采集”，不点击该按钮；未进行来源核验。')
+                print('当前单商品任务结束，批量队列可按此状态继续下一件商品。')
+                return 0
             print('已读取插件成功提示，尚未核验入箱。')
             if args.skip_source_verification:
                 ledger.status(product_id, 'plugin_success_unverified')

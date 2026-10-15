@@ -150,3 +150,35 @@ class DesktopTests(unittest.TestCase):
             with self.assertRaises(StopOperation):
                 ledger.clear_confirmed_no_click('123')
             ledger.close()
+
+    def test_duplicate_button_skips_without_click_or_reservation(self):
+        button = control('重复采集')
+        chrome = self.make_chrome([button])
+        reserve = Mock()
+        self.assertEqual(chrome.click_once('123', before_click=reserve), 'duplicate')
+        button.click_input.assert_not_called()
+        reserve.assert_not_called()
+        chrome.snapshot.return_value = (Mock(), [button], 'https://example.com/', ['采集到店小秘'])
+        with self.assertRaises(StopOperation):
+            chrome.click_once('123', before_click=reserve)
+
+    def test_duplicate_after_attempt_is_distinct_from_success(self):
+        chrome = self.make_chrome([control('重复采集')])
+        self.assertEqual(chrome.wait_success('123', 1), 'duplicate')
+
+    def test_duplicate_cli_exits_without_waiting_or_source_check(self):
+        import sys
+        from desktop_collect import main
+        with tempfile.TemporaryDirectory() as tmp, patch('desktop_collect.WindowsChrome') as cls, patch('builtins.input', side_effect=AssertionError('不得要求核验')), patch('desktop_collect.time.sleep'):
+            cls.return_value.click_once.return_value = 'duplicate'
+            path = Path(tmp) / 'db.sqlite3'
+            with patch.object(sys, 'argv', ['desktop_collect.py', '--product-url', 'https://www.aliexpress.com/item/123.html', '--db', str(path)]):
+                self.assertEqual(main(), 0)
+            cls.return_value.wait_success.assert_not_called()
+            cls.return_value.verify_source.assert_not_called()
+            ledger = AttemptLedger(path)
+            self.assertEqual(ledger.db.execute('SELECT status FROM attempts').fetchone()[0], 'skipped_duplicate')
+            ledger.status('123', 'verified_present')
+            ledger.note_duplicate('123')
+            self.assertEqual(ledger.db.execute('SELECT status FROM attempts').fetchone()[0], 'verified_present')
+            ledger.close()
