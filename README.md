@@ -142,3 +142,29 @@ git pull --ff-only
 ## JOOM 商品字段与本地导入文件准备
 
 已按提供模板加入 12 项个人必填校验、日期序号 SKU 的 SQLite 持久化分配以及保留原模板的本地导出。规则、单位、定价和运行方式见 [PRODUCT_WORKFLOW.md](PRODUCT_WORKFLOW.md)。该功能不会向店小秘导入或发布；售价和搜索标签没有对应模板列，需要单独适配。
+
+## 试验：操作当前已登录 Chrome 的一个商品
+
+新增 `desktop_collect.py`：Windows UI Automation 读取实际窗口/地址栏/控件树，定位唯一“开始采集”按钮，按控件实时区域点击一次，等待“采集成功”，再从店小秘可见来源字段核对商品 ID。**这是待 Windows 本机验证的试验功能，模拟测试不代表真实 Chrome 已兼容。** 没有使用固定坐标、剪贴板、CDP 或隐藏接口；不保存截图、网页正文或登录凭据。
+
+先确认店小秘采集箱中尚不存在目标商品；已有商品只运行 `--verify-only`。首次测试请使用另一个尚未采集的商品；此前 `1005012488453051` 已人工采集，不能再次用它测试点击。
+
+```powershell
+git pull --ff-only
+.\.venv\Scripts\python.exe -m pip install -r requirements-desktop.txt
+.\.venv\Scripts\python.exe desktop_collect.py --product-url "https://www.aliexpress.com/item/替换为尚未采集的数字ID.html"
+```
+
+程序不会打开或切换浏览器，先手动打开已登录的 Chrome 目标商品页。终端输入 `COLLECT` 后，有 5 秒切换回正确 Chrome 标签页；之后不要操作鼠标键盘。必须能通过 UIA 读到前台 Chrome 地址栏、浮窗标识及唯一按钮，并通过实时元素命中检查后才点击。地址栏不识别、按钮不是可访问控件、被遮挡、验证码、旧成功提示、未知子窗口、焦点改变或超时都会停止，绝不猜坐标或自动再次点击。如果你电脑 Chrome 的可访问性不支持这些控件，本版本不可用，需要进一步本机适配，不能据此声称按钮已点击。
+
+读取成功提示后，**仍需你手动进入店小秘采集箱、搜索来源 ID 并打开该商品详情页**。回终端按 Enter，再在 5 秒内切回该详情页，程序读取可见“来源URL”及精确商品 ID。此版本没有自动导航店小秘后台，因此整条链路是半自动，不能宣称全自动。不会点击保存、认领、编辑字段或发布。
+
+未知结果或已有商品只核验：
+
+```powershell
+.\.venv\Scripts\python.exe desktop_collect.py --verify-only --product-url "https://www.aliexpress.com/item/1005012488453051.html"
+```
+
+每个商品的尝试在点击前写入本地 `output/desktop-attempts.sqlite3`，即使中断、点击前检查失败或崩溃，后续也拒绝自动重复点击。先人工核验，不要删库强行重试。标记 `verified_present` 只证明当前店小秘可见来源匹配，不保证是此次新建，也不保证历史未重复。此功能一次只处理一个商品、不并发，SQLite 文件需要保留。
+
+Ctrl+C 可在终端中断，操作系统可切走 Chrome 让后续检查停止；这不是全局紧急停止键，已发出的点击无法撤回。保持 Windows 解锁，终端与 Chrome 以同等权限运行（推荐均普通权限），不要在锁屏或远程会话断开时运行。

@@ -1,0 +1,220 @@
+"""Conservative single-product UI Automation for an existing Windows Chrome.
+No CDP, clipboard, credential access, fixed coordinates or hidden APIs.
+"""
+import argparse
+import sqlite3
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urlsplit
+from dianxiaomi_reader import source_identity
+
+SUCCESS = '采集成功'
+BLOCKERS = ('验证码', '人机验证', '安全验证', 'captcha', 'verify you are human', '采集失败', '登录失效')
+ADDRESS_NAMES = {'地址和搜索栏', '地址栏和搜索栏', 'Address and search bar', 'Address and Search Bar'}
+
+
+class StopOperation(RuntimeError):
+    pass
+
+
+class AttemptLedger:
+    def __init__(self, path):
+        self.db = sqlite3.connect(path)
+        self.db.execute('CREATE TABLE IF NOT EXISTS attempts (product_id TEXT PRIMARY KEY, status TEXT NOT NULL, updated TEXT DEFAULT CURRENT_TIMESTAMP)')
+
+    def claim(self, product_id):
+        try:
+            self.db.execute('BEGIN IMMEDIATE')
+            existing = self.db.execute('SELECT status FROM attempts WHERE product_id=?', (product_id,)).fetchone()
+            if existing:
+                raise StopOperation('该商品已有操作记录；请使用 --verify-only 先核验，不自动重复点击。')
+            self.db.execute('INSERT INTO attempts(product_id,status) VALUES (?,?)', (product_id, 'pending_verification'))
+            self.db.commit()
+        except BaseException:
+            self.db.rollback()
+            raise
+
+    def status(self, product_id, status):
+        self.db.execute('INSERT INTO attempts(product_id,status) VALUES (?,?) ON CONFLICT(product_id) DO UPDATE SET status=excluded.status, updated=CURRENT_TIMESTAMP', (product_id, status))
+        self.db.commit()
+
+    def close(self):
+        self.db.close()
+
+
+def normalized_address(value):
+    value = value.strip()
+    if '://' not in value:
+        value = 'https://' + value
+    return value
+
+
+def exact_product(value, product_id):
+    return source_identity(normalized_address(value))[1] == product_id
+
+
+def inspect_texts(texts):
+    lowered = '\n'.join(texts).lower()
+    if any(word.lower() in lowered for word in BLOCKERS):
+        raise StopOperation('检测到验证或失败提示，已停止；请人工处理，不重复采集。')
+    return SUCCESS in lowered
+
+
+class WindowsChrome:
+    def __init__(self):
+        if sys.platform != 'win32':
+            raise StopOperation('本模块只能在 Windows 桌面运行。')
+        from pywinauto import Desktop
+        import psutil
+        import win32gui
+        self.desktop = Desktop(backend='uia')
+        self.psutil = psutil
+        self.win32gui = win32gui
+
+    def foreground(self):
+        handle = self.win32gui.GetForegroundWindow()
+        root = self.desktop.window(handle=handle).wrapper_object()
+        if root.class_name() != 'Chrome_WidgetWin_1':
+            raise StopOperation('前台不是 Chrome，停止操作。')
+        if Path(self.psutil.Process(root.process_id()).exe()).name.lower() != 'chrome.exe':
+            raise StopOperation('前台程序不是 Google Chrome，停止操作。')
+        return root
+
+    def controls(self, root):
+        # UIA may be unavailable on some Chrome versions. Never fall back to guessing.
+        controls = root.descendants()
+        if len(controls) > 10000:
+            raise StopOperation('页面控件过多，停止自动操作。')
+        return [control for control in controls if control.is_visible()]
+
+    def address(self, root, controls):
+        addresses = []
+        for control in controls:
+            if control.element_info.control_type == 'Edit' and control.window_text() in ADDRESS_NAMES:
+                addresses.append(control.get_value())
+        if len(addresses) != 1:
+            raise StopOperation('无法唯一读取 Chrome 地址栏；不进行点击。请确认 Chrome 可访问性支持。')
+        return normalized_address(addresses[0])
+
+    def snapshot(self):
+        root = self.foreground()
+        controls = self.controls(root)
+        address = self.address(root, controls)
+        # Values are inspected in memory only, never printed, uploaded or persisted.
+        texts = [control.window_text() for control in controls
+                 if control.element_info.control_type in {'Text', 'Button', 'Hyperlink', 'Document'}]
+        if any(control.element_info.control_type == 'Window' for control in controls):
+            raise StopOperation('检测到子窗口或弹窗，停止自动操作。')
+        return root, controls, address, texts
+
+    def click_once(self, product_id):
+        root, controls, address, texts = self.snapshot()
+        if not exact_product(address, product_id):
+            raise StopOperation('前台地址栏不是指定速卖通商品，不进行点击。')
+        if inspect_texts(texts):
+            raise StopOperation('已有采集成功提示，可能是旧结果；请先核验，不能重复点击。')
+        if not any('采集到店小秘' in text for text in texts):
+            raise StopOperation('未找到店小秘浮窗标识，不进行点击。')
+        candidates = [c for c in controls if c.window_text().strip() == '开始采集'
+                      and c.element_info.control_type in {'Button', 'Hyperlink'} and c.is_enabled()]
+        if len(candidates) != 1:
+            raise StopOperation('无法唯一定位可操作的“开始采集”按钮；不会猜测坐标。')
+        button = candidates[0]
+        bounds = button.rectangle()
+        if bounds.width() <= 0 or bounds.height() <= 0:
+            raise StopOperation('按钮区域无效。')
+        # UIA locator + live hit test, rather than a stored screen coordinate.
+        point = (bounds.left + bounds.width() // 2, bounds.top + bounds.height() // 2)
+        hit = self.desktop.from_point(*point)
+        if hit.element_info.runtime_id != button.element_info.runtime_id:
+            raise StopOperation('按钮被其他元素覆盖，停止点击。')
+        if self.win32gui.GetForegroundWindow() != root.handle:
+            raise StopOperation('窗口焦点发生变化，停止点击。')
+        button.click_input()
+
+    def wait_success(self, product_id, timeout):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            _, _, address, texts = self.snapshot()
+            if not exact_product(address, product_id):
+                raise StopOperation('等待期间离开目标商品页，结果未知，先核验。')
+            if inspect_texts(texts):
+                return
+            time.sleep(0.5)
+        raise StopOperation('未在时限内读到成功提示；结果未知，先核验，不重试点击。')
+
+    def verify_source(self, product_id):
+        _, controls, address, texts = self.snapshot()
+        host = (urlsplit(address).hostname or '').lower()
+        if host != 'dianxiaomi.com' and not host.endswith('.dianxiaomi.com'):
+            raise StopOperation('前台不是店小秘页面，无法核验。')
+        inspect_texts(texts)
+        # Explicit source label guards against treating an unrelated URL as evidence.
+        if not any('来源URL' in text.replace(' ', '') for text in texts):
+            raise StopOperation('未识别来源URL字段，请打开采集商品详情页后重试核验。')
+        for control in controls:
+            if control.element_info.control_type not in {'Edit', 'Hyperlink', 'Text'}:
+                continue
+            value = control.window_text().strip()
+            if control.element_info.control_type == 'Edit':
+                try:
+                    value = control.get_value().strip()
+                except Exception:
+                    continue
+            if exact_product(value, product_id):
+                return True
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Windows 当前 Chrome 单商品采集试验；首次只处理一个商品')
+    parser.add_argument('--product-url', required=True)
+    parser.add_argument('--verify-only', action='store_true', help='未知结果先核验，不点击插件')
+    parser.add_argument('--timeout', type=int, default=30)
+    parser.add_argument('--db', type=Path, default=Path('output/desktop-attempts.sqlite3'))
+    args = parser.parse_args()
+    _, product_id = source_identity(args.product_url)
+    if not product_id or not args.product_url.startswith('https://'):
+        parser.error('需要 HTTPS 速卖通商品详情 URL')
+    if not 1 <= args.timeout <= 120:
+        parser.error('--timeout 必须在 1 到 120 秒之间')
+    ledger = None
+    try:
+        chrome = WindowsChrome()
+        args.db.parent.mkdir(parents=True, exist_ok=True)
+        ledger = AttemptLedger(args.db)
+        if not args.verify_only:
+            print('请先在采集箱确认该商品尚未存在。已存在的商品请改用 --verify-only。')
+            if input('仅授权一次“开始采集”点击请输入 COLLECT：').strip() != 'COLLECT':
+                raise StopOperation('未授权点击，已退出。')
+            print('请在 5 秒内切换到目标商品的 Chrome 标签页；倒计时后不要操作鼠标键盘。Ctrl+C 可中断终端。')
+            time.sleep(5)
+            # Persist UNKNOWN before any attempted click. Even a crash cannot cause an automatic retry.
+            ledger.claim(product_id)
+            chrome.click_once(product_id)
+            chrome.wait_success(product_id, args.timeout)
+            print('已读取插件成功提示，尚未核验入箱。')
+        print('请在原 Chrome 中手动进入店小秘采集箱，按来源 ID 搜索并打开该商品详情。不要保存或认领。')
+        print('待核验来源 ID：', product_id)
+        input('准备好后回终端按 Enter，再在 5 秒内切回该店小秘详情页：')
+        time.sleep(5)
+        if not chrome.verify_source(product_id):
+            raise StopOperation('未找到精确来源 ID，保持待核验；不要重复采集。')
+        ledger.status(product_id, 'verified_present')
+        print('核验通过：当前店小秘页面的可见来源链接与目标 ID 匹配。仅证明存在，不证明此次新建或整店采集成功。')
+        return 0
+    except StopOperation as error:
+        print(str(error))
+        print('未完成时先人工检查；未知结果请使用 --verify-only，不自动重试。')
+        return 1
+    except (Exception, KeyboardInterrupt) as error:
+        print('已停止；异常类型：', type(error).__name__, '。不输出页面或账号内容；请先人工核验。')
+        return 1
+    finally:
+        if ledger:
+            ledger.close()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
