@@ -1,0 +1,16 @@
+[
+  {
+    "record_key": "DEMO-product-001:black-small",
+    "中文名称": "测试商品（示例，不可直接导入）",
+    "英文名称": "Demo product - not for actual import",
+    "商品净重": 100,
+    "来源URL": "https://example.com/demo-product",
+    "长": 10,
+    "宽": 8,
+    "高": 3,
+    "英文报关名": "Demo item",
+    "中文报关名": "测试品",
+    "申报重量": 120,
+    "申报金额": "5.00"
+  }
+]

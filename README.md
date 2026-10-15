@@ -138,3 +138,7 @@ git pull --ff-only
 需要固定资料时，在目标 Chrome 中打开 `chrome://version`，查看“个人资料路径”的末尾目录名（如 `Default` 或 `Profile 1`），只将这个目录名传给 `--profile "Profile 1"`，不要分享完整路径或账号信息。目录名需来自已有资料，否则 Chrome 可能新建该资料。
 
 此入口只打开浏览器和商品页，不附着 Playwright，不自动安装插件，也不验证采集结果。请通过已安装的官方插件手动测试一个商品，再到采集箱按来源 ID 核对。真实 Chrome 打开及登录状态尚需 Windows 本机验证。
+
+## JOOM 商品字段与本地导入文件准备
+
+已按提供模板加入 12 项个人必填校验、日期序号 SKU 的 SQLite 持久化分配以及保留原模板的本地导出。规则、单位、定价和运行方式见 [PRODUCT_WORKFLOW.md](PRODUCT_WORKFLOW.md)。该功能不会向店小秘导入或发布；售价和搜索标签没有对应模板列，需要单独适配。

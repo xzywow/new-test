@@ -6,3 +6,5 @@ output/
 .diagnostic-chrome/
 .local-extensions/
 *.crx
+*.sqlite3
+*.sqlite3-*
