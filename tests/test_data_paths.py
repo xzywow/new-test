@@ -9,7 +9,7 @@ from data_paths import default_data_dir, ensure_data_dir, resolve_default_file
 class DataPathTests(unittest.TestCase):
     def test_windows_default(self):
         with patch('data_paths.sys.platform', 'win32'):
-            self.assertEqual(str(default_data_dir()), r'D:\店小秘数据')
+            self.assertEqual(str(default_data_dir()), r'E:\店小秘数据')
 
     def test_migration_preserves_records_and_repeat_keeps_new_data(self):
         with tempfile.TemporaryDirectory() as tmp:

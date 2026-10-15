@@ -12,7 +12,7 @@ MARKER = '.dxm-migration.json'
 
 
 def default_data_dir():
-    return Path(r'D:\店小秘数据') if sys.platform == 'win32' else PROJECT / 'output'
+    return Path(r'E:\店小秘数据') if sys.platform == 'win32' else PROJECT / 'output'
 
 
 def fingerprint(source):
@@ -27,7 +27,7 @@ def ensure_data_dir(destination=None, source=None):
         destination.mkdir(parents=True, exist_ok=True)
         return destination
     if sys.platform == 'win32' and not Path(destination.anchor).is_dir():
-        raise OSError('数据盘不可用，请检查 D 盘或使用 --db/--output 指定已有磁盘。')
+        raise OSError('数据盘不可用，请检查 E 盘或使用 --db/--output 指定已有磁盘。')
     if source.is_symlink() or (source.exists() and not source.is_dir()):
         raise OSError('旧 output 不是普通目录，停止迁移。')
     if source.exists() and source.is_dir() and any(source.iterdir()):
@@ -40,7 +40,7 @@ def ensure_data_dir(destination=None, source=None):
         else:
             # Never silently replace an existing database with a different history.
             if destination.exists() and any(destination.iterdir()):
-                raise OSError('D 盘目标目录与旧 output 同时有数据，停止迁移；请先人工核对，不能覆盖合并。')
+                raise OSError('E 盘目标目录与旧 output 同时有数据，停止迁移；请先人工核对，不能覆盖合并。')
             destination.parent.mkdir(parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix='.dxm-migrate-', dir=destination.parent))
             try:

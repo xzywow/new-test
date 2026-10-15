@@ -11,7 +11,7 @@ def main():
     parser.add_argument('--template', type=Path, required=True)
     parser.add_argument('--input', type=Path, required=True, help='UTF-8 JSON 商品数组')
     parser.add_argument('--output', type=Path, help='默认数据目录内的 dxm-import.xlsx；不覆盖已有文件')
-    parser.add_argument('--db', type=Path, help='默认 Windows D 盘业务数据目录')
+    parser.add_argument('--db', type=Path, help='默认 Windows E 盘业务数据目录')
     args = parser.parse_args()
     registry = None
     try:

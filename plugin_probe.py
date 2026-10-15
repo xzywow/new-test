@@ -111,7 +111,7 @@ def main():
     parser.add_argument('--product-url', required=True)
     parser.add_argument('--rows', default='table tbody tr', help='实际采集箱商品行 CSS 选择器')
     parser.add_argument('--endpoint', help='明确授权复用的本机 Chrome CDP 地址；不会读取或复制个人浏览器目录')
-    parser.add_argument('--report', type=Path, help='默认 Windows D 盘业务数据目录')
+    parser.add_argument('--report', type=Path, help='默认 Windows E 盘业务数据目录')
     args = parser.parse_args()
     source, product_id = source_identity(args.product_url)
     if not product_id or urlsplit(source).scheme != 'https':

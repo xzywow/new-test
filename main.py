@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description='店小秘采集箱只读导出工具')
     parser.add_argument('--selectors', type=Path, help='自定义 CSS 选择器 JSON')
     parser.add_argument('--profile', type=Path, default=Path('.browser-profile'))
-    parser.add_argument('--output', type=Path, help='导出目录，Windows 默认 D:\\店小秘数据')
+    parser.add_argument('--output', type=Path, help='导出目录，Windows 默认 E:\\店小秘数据')
     parser.add_argument('--max-pages', type=int, default=100)
     args = parser.parse_args()
     if args.max_pages < 1:

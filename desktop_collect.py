@@ -247,7 +247,7 @@ def main():
     parser.add_argument('--clear-confirmed-no-click', action='store_true', help='仅解除人工确认从未点击的旧待核验记录，不执行采集')
     parser.add_argument('--verify-only', action='store_true', help='未知结果先核验，不点击插件')
     parser.add_argument('--timeout', type=int, default=30)
-    parser.add_argument('--db', type=Path, help='数据库路径，Windows 默认 D:\\店小秘数据\\desktop-attempts.sqlite3')
+    parser.add_argument('--db', type=Path, help='数据库路径，Windows 默认 E:\\店小秘数据\\desktop-attempts.sqlite3')
     args = parser.parse_args()
     _, product_id = source_identity(args.product_url or '')
     if not args.diagnose and (not product_id or not args.product_url.startswith('https://')):
